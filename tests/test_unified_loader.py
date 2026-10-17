@@ -23,7 +23,10 @@ def _load_module():
     fake_torch.cuda = types.SimpleNamespace(is_available=lambda: False)
     sys.modules["torch"] = fake_torch
     path = Path(__file__).parents[1] / "nodes.py"
-    spec = importlib.util.spec_from_file_location("muse_unified_nodes", path)
+    package = types.ModuleType("muse_unified_test")
+    package.__path__ = [str(path.parent)]
+    sys.modules[package.__name__] = package
+    spec = importlib.util.spec_from_file_location("muse_unified_test.nodes", path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module

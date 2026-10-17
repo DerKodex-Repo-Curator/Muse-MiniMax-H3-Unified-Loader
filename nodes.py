@@ -10,6 +10,7 @@ import os
 import folder_paths
 import nodes
 import torch
+from .loader_checks import apply_pinned_limit
 
 LOGGER = logging.getLogger(__name__)
 OFF = "(disabled)"
@@ -137,7 +138,7 @@ class MuseMiniMaxH3UnifiedLoader:
                 "lora_3_strength": ("FLOAT", {"default": 1.0, "min": -10.0, "max": 10.0, "step": 0.05}),
                 "lora_3_target": (("Both models", "Reference model", "First/Last model"),),
                 "attention_backend": (("Off", "comfy kitchen attention", "pytorch attention"), {"default": "Off"}),
-                "sage_attention": ("BOOLEAN", {"default": True}),
+                "sage_attention": ("BOOLEAN", {"default": False}),
                 "low_vram_attention": ("BOOLEAN", {"default": True}),
                 "attention_head_chunks": ("INT", {"default": 4, "min": 1, "max": 56}),
                 "chunk_feed_forward": ("BOOLEAN", {"default": True}),
@@ -220,7 +221,7 @@ class MuseMiniMaxH3UnifiedLoader:
     _REQUIRED_NODE_SOURCES = {
         "H3ModelLoaderAny": "ComfyUI-H3-Multishot (https://github.com/jlucasmcrell/ComfyUI-H3-Multishot)",
         "H3ClipLoaderAny": "ComfyUI-H3-Multishot (https://github.com/jlucasmcrell/ComfyUI-H3-Multishot)",
-        "ModelAttentionBackend": "ComfyUI-KJNodes (https://github.com/kijai/ComfyUI-KJNodes)",
+        "ModelAttentionBackend": "ComfyUI core (update ComfyUI for the Model Attention Backend node)",
         "MiniMaxH3MemoryEfficientSageAttentionPatch": "ComfyUI-KJNodes (https://github.com/kijai/ComfyUI-KJNodes)",
         "MiniMaxLowVRAMAttention": "ComfyUI-KJNodes (https://github.com/kijai/ComfyUI-KJNodes)",
         "MiniMaxChunkFeedForward": "ComfyUI-KJNodes (https://github.com/kijai/ComfyUI-KJNodes)",
@@ -262,7 +263,17 @@ class MuseMiniMaxH3UnifiedLoader:
     def _patch_attention(self, model, values):
         backend = values["attention_backend"]
         if backend != "Off":
-            model = _unwrap(self._registry_class("ModelAttentionBackend")().patch(model, backend))
+            backend_class = self._registry_class("ModelAttentionBackend")
+            # Current ComfyUI uses the V3 classmethod; retain older core support.
+            if callable(getattr(backend_class, "execute", None)):
+                model = _unwrap(backend_class.execute(model=model, attention=backend))
+            elif callable(getattr(backend_class, "patch", None)):
+                model = _unwrap(backend_class().patch(model, backend))
+            else:
+                raise RuntimeError(
+                    "Unsupported ComfyUI Model Attention Backend API. Update ComfyUI "
+                    "or set the Unified Loader's Advanced > Model Attention Backend to Off."
+                )
         # Sol-Attn removed 2026-09-04: confirmed via a controlled A/B test (same
         # GGUF Low-VRAM run, only this toggle changed) to cause an unload to free
         # almost nothing at a chunk-transition point and stall the render there.
@@ -285,21 +296,8 @@ class MuseMiniMaxH3UnifiedLoader:
 
     def load(self, **values):
         lora_rows = _lora_rows(values)
-        # [2026-09-09] Apply the pinned-memory pool cap before anything loads or
-        # pins. MAX_PINNED_MEMORY is a live module global read on every pin/evict
-        # check, so mutating it here takes effect for this run. Only lowers it.
-        _pin_choice = str(values.get("pinned_memory_cap", "Default (40% of RAM)"))
-        if _pin_choice and _pin_choice[0].isdigit():
-            try:
-                import comfy.model_management as _mm
-                _cap = int(float(_pin_choice.split()[0]) * (1024 ** 3))
-                _was = float(_mm.MAX_PINNED_MEMORY) / (1024 ** 3)
-                if _mm.MAX_PINNED_MEMORY <= 0 or _cap < _mm.MAX_PINNED_MEMORY:
-                    _mm.MAX_PINNED_MEMORY = _cap
-                    LOGGER.info("[Muse Unified Loader] pinned-memory pool capped at %s "
-                                "(was %.1f GB).", _pin_choice, _was)
-            except Exception as _exc:
-                LOGGER.warning("[Muse Unified Loader] could not apply pinned-memory cap: %s", _exc)
+        import comfy.model_management as _mm
+        apply_pinned_limit(_mm, values.get("pinned_memory_cap", "Default (ComfyUI)"))
         vram_gb = self._vram_gb()
         selected, preferred = self._select_profile(values["profile"], vram_gb, values)
         prefix = self._prefix(selected)

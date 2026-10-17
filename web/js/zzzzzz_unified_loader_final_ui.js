@@ -3,7 +3,7 @@ import { app } from "../../../scripts/app.js";
 const NODE_NAME = "MuseMiniMaxH3UnifiedLoader";
 const GROUPS = [
   { id: "profile", title: "VRAM QUALITY PROFILE", subtitle: "Automatic detects GPU VRAM and selects one tier for every branch", color: "#8fa5bd", fill: "rgba(55,70,88,.30)", names: ["profile"] },
-  { id: "pinned", title: "PINNED MEMORY POOL", subtitle: "Page-locked RAM buffer (ComfyUI default ~40% of RAM) — lower it to free system RAM; may slow CPU-GPU transfers", color: "#6fbf73", fill: "rgba(34,88,40,.26)", names: ["pinned_memory_cap"] },
+  { id: "pinned", title: "PINNED MEMORY POOL", subtitle: "Shared RAM limit — Default restores ComfyUI's limit; lower caps may slow transfers", color: "#6fbf73", fill: "rgba(34,88,40,.26)", names: ["pinned_memory_cap"] },
   { id: "reference", title: "REFERENCE MODEL", subtitle: "Ref2VA checkpoints — selected tier feeds the Director model socket", color: "#a970ff", fill: "rgba(75,42,112,.28)", names: ["low_vram_model", "balanced_model", "maximum_quality_model"] },
   { id: "fl2va", title: "FIRST / LAST-FRAME MODEL", subtitle: "FL2VA checkpoints — selected tier feeds the model_fl2va socket", color: "#668cff", fill: "rgba(36,55,116,.28)", names: ["low_vram_fl2va", "balanced_fl2va", "maximum_quality_fl2va"] },
   { id: "clip", title: "SHARED CLIP ENCODER", subtitle: "Used by both modes; leave the GGUF vision projector on Auto", color: "#e5cf55", fill: "rgba(112,96,24,.26)", names: ["low_vram_clip", "low_vram_mmproj", "balanced_clip", "balanced_mmproj", "maximum_quality_clip", "maximum_quality_mmproj"] },
@@ -171,6 +171,13 @@ function install(node, booleanNames) {
     if (byName.get(name)) byName.get(name).label = label;
   }
   const groups = node._museFinalGroups = GROUPS.map(group => ({ ...group, names: [...group.names] }));
+  // GROUPS retains the historical positional layout for legacy workflow recovery.
+  // Only change display order; modern saves restore settings by widget name.
+  const attentionGroup = groups.find(group => group.id === "attention");
+  attentionGroup.names = attentionGroup.names.filter(name => name !== "attention_backend");
+  const advancedGroup = groups.find(group => group.id === "advanced");
+  advancedGroup.names.unshift("attention_backend");
+  advancedGroup.subtitle = "Backend normally Off; activation reserve normally Automatic (0)";
   const groupedNames = new Set(groups.flatMap((group) => group.names));
   const rebuilt = native.filter((widget) => !groupedNames.has(widget.name) && widget.name !== "extra_loras");
   for (const group of groups) {

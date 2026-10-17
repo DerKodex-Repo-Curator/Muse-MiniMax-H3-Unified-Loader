@@ -1,5 +1,17 @@
 # Muse MiniMax H3 Unified Loader
 
+## Compatibility update — 18 October 2026 (v1.3.0)
+
+Updated and render-tested with **ComfyUI 0.41.3**, Python 3.12.10 and PyTorch 2.9.1+cu130 on Windows. This is the tested baseline, not a requirement to install that exact PyTorch/CUDA build. The RunPod/Linux package includes the same loader fixes; this release does not claim a new Linux GPU render test.
+
+- Uses the current ComfyUI Model Attention Backend `execute` API, with the legacy `patch` fallback. Its optional selector is under Advanced and defaults to Off.
+- SageAttention and High-Res Stability default to Off. Low-VRAM attention and feed-forward chunking remain enabled.
+- When SageAttention is enabled, the browser checks compatibility before queueing and shows an explanatory OK notice when setup needs attention. Direct API submissions retain a defensive backend check.
+- Default pinned memory now follows ComfyUI. Explicit caps do not exceed its original limit; changing back to Default restores it, and disabled pinning stays disabled.
+- Automatic selects an available complete model/encoder profile when its preferred profile is disabled. It does not download models or change their quantization.
+
+Existing workflows retain their saved settings. After updating, restart ComfyUI and hard-refresh the browser. Keep SageAttention off unless its package and CUDA kernels match your environment. Model weights are not included.
+
 **One hardware-aware loader for the whole MiniMax H3 Director model stack — model, CLIP, VAEs, LoRAs, and attention patches — auto-selected from your detected VRAM.**
 
 Built by [Muse Collective](https://musecollective.co.uk) for use with [Muse Minimax Director](https://github.com/muse-collective-26/MiniMaxH3-Director-V1.2). Instead of wiring a separate model loader, CLIP loader, VAE loaders, LoRA stack, and attention-patch nodes by hand — and picking the right combination for your specific GPU yourself — this node exposes three fixed profiles (Low VRAM / Balanced / Maximum Quality), each fully configurable, and picks the right one automatically from your card's detected VRAM.
@@ -10,7 +22,7 @@ Built by [Muse Collective](https://musecollective.co.uk) for use with [Muse Mini
 
 > **Before you run this node, install these two dependencies manually — ComfyUI Manager's "install missing custom nodes" prompt will NOT catch them.** This node calls them internally at runtime rather than placing them as their own nodes in the workflow graph, which is the only thing Manager's missing-node scanner checks. Skipping this step gets you a `RuntimeError: Required node '...' is not installed or did not load.` the moment you run the node.
 > - **[ComfyUI-H3-Multishot](https://github.com/jlucasmcrell/ComfyUI-H3-Multishot)** — always required.
-> - **[ComfyUI-KJNodes](https://github.com/kijai/ComfyUI-KJNodes)** — required if you leave any of SageAttention / low-VRAM attention / chunked feed-forward switched on (all on by default).
+> - **[ComfyUI-KJNodes](https://github.com/kijai/ComfyUI-KJNodes)** — required for enabled attention/memory patches. Low-VRAM attention and chunked feed-forward default on; SageAttention defaults off.
 >
 > Install both the same way as this node (Manager search, or `git clone` into `custom_nodes`), then restart ComfyUI.
 

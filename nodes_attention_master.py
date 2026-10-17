@@ -2,6 +2,7 @@
 
 from .nodes_userfriendly import MuseMiniMaxH3UnifiedLoader as _FriendlyLoader
 from .high_res_stability import apply_high_res_stability
+from .loader_checks import check_sage
 
 
 def _attention_boolean(value, name):
@@ -24,7 +25,7 @@ class MuseMiniMaxH3UnifiedLoader(_FriendlyLoader):
     def INPUT_TYPES(cls):
         schema = super().INPUT_TYPES()
         for name, tooltip in (
-            ("sage_attention", "MiniMax H3-specific memory-efficient Sage patch. Separate from ComfyUI's launch-time --use-sage-attention setting."),
+            ("sage_attention", "Optional H3 memory-efficient Sage patch. Requires compatible SageAttention, PyTorch/CUDA and GPU support. Checked before loading models. OFF does not disable ComfyUI launch-time SageAttention."),
             ("attention_backend", "Per-model backend override. Off means no override from this control; it does not disable launch-time Sage or the MiniMax-specific Sage toggle."),
         ):
             spec = schema["required"].get(name)
@@ -32,7 +33,7 @@ class MuseMiniMaxH3UnifiedLoader(_FriendlyLoader):
                 options = dict(spec[1]) if len(spec) > 1 else {}
                 options["tooltip"] = tooltip
                 if name == "sage_attention":
-                    options.update(label_on="ON", label_off="OFF")
+                    options.update(default=False, label_on="ON", label_off="OFF")
                 schema["required"][name] = (spec[0], options)
         # Append for saved-workflow compatibility. The fascia repositions this
         # control visually at the top of the Attention & Memory card.
@@ -50,20 +51,15 @@ class MuseMiniMaxH3UnifiedLoader(_FriendlyLoader):
             ["Both / Mixed", "Reference only", "First/Last only"],
             {"default": "Both / Mixed", "tooltip": "Skip loading the unused transformer and its LoRA/attention patches. Match Director mode; Both is required for mixed timelines."},
         )
-        # [2026-09-09] Append only. Pinned-memory pool cap. ComfyUI hardcodes the
-        # ceiling at 40% of total RAM (~20 GB on a 48 GB box) — a page-locked
-        # buffer that can't be swapped out, so on a RAM-tight machine it fights
-        # the model set. Lowering it frees system RAM at some cost to CPU->GPU
-        # transfer speed. "Default" leaves ComfyUI's value untouched; a number
-        # only ever LOWERS the cap. Applied at the top of load(); the fascia
-        # shows it as its own section below the VRAM quality profile.
+        # Keep the input position and legacy enum for saved workflows.
+        # The runtime helper tracks the original process-wide limit.
         schema["required"]["pinned_memory_cap"] = (
-            ["Default (40% of RAM)", "16 GB", "14 GB", "12 GB", "10 GB", "8 GB", "6 GB"],
-            {"default": "Default (40% of RAM)", "tooltip": "Cap the page-locked RAM buffer. Default = ComfyUI's 40%-of-RAM ceiling. Lower it to free system RAM for the model set; may slow weight streaming. Try 12 GB on 48 GB RAM, ~8-10 GB to target 32 GB."},
+            ["Default (ComfyUI)", "16 GB", "14 GB", "12 GB", "10 GB", "8 GB", "6 GB", "Default (40% of RAM)"],
+            {"default": "Default (ComfyUI)", "tooltip": "Process-wide page-locked RAM limit. Default restores the limit captured before Muse changed it; the limit depends on your OS and ComfyUI settings. Numeric caps never exceed that limit or enable disabled pinning. Applies when this loader runs; multiple loaders share the limit. The old 40% label is retained for saved workflows."},
         )
         schema["required"]["high_res_stability"] = (
             "BOOLEAN", {"default": False, "label_on": "ON", "label_off": "OFF",
-            "tooltip": "Experimental fix for corrupted or noisy output at higher resolutions and longer clips. Requires Sage Attention and attention optimisations ON. May use extra VRAM."},
+            "tooltip": "Packs H3 Sage attention inputs into contiguous memory before kernel execution, addressing strided-input issues. Requires SageAttention and attention optimisations ON. May allocate extra VRAM; leave OFF unless needed."},
         )
         # Optional and appended: existing saved widgets retain their positions.
         schema.setdefault("optional", {})["extra_loras"] = (
@@ -84,10 +80,12 @@ class MuseMiniMaxH3UnifiedLoader(_FriendlyLoader):
                      "low_vram_attention", "chunk_feed_forward"):
             if name in values:
                 values[name] = _attention_boolean(values[name], name)
+        if values.get("attention_enabled", True) and values.get("sage_attention", False):
+            check_sage(self._registry_class)
         result = super().load(**values)
         if values.get("high_res_stability", False):
             active = values.get("attention_enabled", True) and values.get("sage_attention", False)
-            status = result["result"][-1] + (" High-Res Stability ON (experimental)." if active else " High-Res Stability inactive: enable attention optimisations and Sage Attention.")
+            status = result["result"][-1] + (" High-Res Stability ON (contiguous Sage inputs)." if active else " High-Res Stability inactive: enable attention optimisations and Sage Attention.")
             result["result"] = (*result["result"][:-1], status)
             result["ui"] = {"text": [status]}
         return result
